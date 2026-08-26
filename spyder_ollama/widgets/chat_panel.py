@@ -9,10 +9,12 @@
 import logging
 
 # Third party imports
-from qtpy.QtCore import Qt, Signal
+from qtpy.QtCore import QEvent, Qt, Signal
 from qtpy.QtGui import QFont, QTextCursor
 from qtpy.QtWidgets import (
+    QComboBox,
     QHBoxLayout,
+    QLabel,
     QPlainTextEdit,
     QPushButton,
     QSplitter,
@@ -27,6 +29,7 @@ from spyder.api.widgets.main_widget import PluginMainWidget
 
 # Local imports
 from spyder_ollama.chat_client import OllamaChatClient
+from spyder_ollama.client import fetch_ollama_models
 
 
 logger = logging.getLogger(__name__)
@@ -34,9 +37,7 @@ logger = logging.getLogger(__name__)
 
 class OllamaChatActions:
     ExplainSelection = "explain_selection"
-    AskQuestion = "ask_question"
     ClearChat = "clear_chat"
-    StopGeneration = "stop_generation"
 
 
 class OllamaChatWidget(PluginMainWidget):
@@ -44,8 +45,8 @@ class OllamaChatWidget(PluginMainWidget):
 
     ENABLE_SPINNER = True
 
-    # Signal to request selected text from editor
     sig_request_editor_selection = Signal()
+    sig_model_changed = Signal(str)
 
     def __init__(self, name, plugin, parent=None):
         super().__init__(name, plugin, parent)
@@ -57,8 +58,27 @@ class OllamaChatWidget(PluginMainWidget):
             self._on_response_finished
         )
         self.chat_client.sig_error.connect(self._on_error)
+        self.chat_client.sig_notice.connect(self._append_system)
 
         self._streaming = False
+
+        # --- Model selector row ---
+        self.model_combobox = QComboBox(self)
+        self.model_combobox.setEditable(False)
+        self.model_combobox.currentTextChanged.connect(
+            self._on_model_selected
+        )
+
+        self.refresh_models_btn = QPushButton(_("Refresh"), self)
+        self.refresh_models_btn.clicked.connect(self.populate_models)
+
+        model_row = QHBoxLayout()
+        model_row.addWidget(QLabel(_("Model:"), self))
+        model_row.addWidget(self.model_combobox, stretch=1)
+        model_row.addWidget(self.refresh_models_btn)
+
+        model_container = QWidget(self)
+        model_container.setLayout(model_row)
 
         # --- Conversation display ---
         self.chat_display = QTextEdit(self)
@@ -76,7 +96,7 @@ class OllamaChatWidget(PluginMainWidget):
         self.input_edit = QPlainTextEdit(self)
         self.input_edit.setMaximumHeight(100)
         self.input_edit.setPlaceholderText(
-            _("Ask a question... (Shift+Enter to send)")
+            _("Ask a question... (Enter to send, Shift+Enter for newline)")
         )
         self.input_edit.installEventFilter(self)
 
@@ -109,6 +129,7 @@ class OllamaChatWidget(PluginMainWidget):
 
         layout = QVBoxLayout()
         layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(model_container)
         layout.addWidget(splitter)
         self.setLayout(layout)
 
@@ -121,7 +142,6 @@ class OllamaChatWidget(PluginMainWidget):
 
     def setup(self):
         """Create actions for the toolbar and menu."""
-        # Explain selection action
         explain_action = self.create_action(
             OllamaChatActions.ExplainSelection,
             text=_("Explain Selection"),
@@ -130,7 +150,6 @@ class OllamaChatWidget(PluginMainWidget):
             register_shortcut=True,
         )
 
-        # Clear chat action
         clear_action = self.create_action(
             OllamaChatActions.ClearChat,
             text=_("Clear Chat"),
@@ -138,12 +157,10 @@ class OllamaChatWidget(PluginMainWidget):
             triggered=self.clear_chat,
         )
 
-        # Add to toolbar
         toolbar = self.get_main_toolbar()
         for item in [explain_action, clear_action]:
             self.add_item_to_toolbar(item, toolbar=toolbar)
 
-        # Add to options menu
         menu = self.get_options_menu()
         for item in [explain_action, clear_action]:
             self.add_item_to_menu(item, menu=menu)
@@ -154,25 +171,40 @@ class OllamaChatWidget(PluginMainWidget):
     # ---- Event filter for Shift+Enter -----------------------------------
     def eventFilter(self, obj, event):
         """Handle Shift+Enter in the input field."""
-        if obj is self.input_edit:
-            from qtpy.QtCore import QEvent
-            from qtpy.QtGui import QKeyEvent
-
-            if event.type() == QEvent.KeyPress:
-                if (
-                    event.key() in (Qt.Key_Return, Qt.Key_Enter)
-                    and event.modifiers() & Qt.ShiftModifier
-                ):
-                    self._on_send_clicked()
-                    return True
+        if obj is self.input_edit and event.type() == QEvent.KeyPress:
+            if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                if event.modifiers() & Qt.ShiftModifier:
+                    # Shift+Enter: let Qt insert a newline
+                    return False
+                self._on_send_clicked()
+                return True
         return super().eventFilter(obj, event)
 
     # ---- Public API -----------------------------------------------------
     def update_client_config(
         self, model_name: str, base_url: str, temperature: float
     ):
-        """Update the chat client configuration."""
+        """Update the chat client configuration and the model selector."""
         self.chat_client.update_config(model_name, base_url, temperature)
+        self.populate_models(preselect=model_name)
+
+    def populate_models(self, preselect: str = ""):
+        """Fill the model selector from the Ollama server."""
+        target = preselect or self.model_combobox.currentText()
+        models = fetch_ollama_models(self.chat_client.base_url)
+
+        self.model_combobox.blockSignals(True)
+        self.model_combobox.clear()
+        if models:
+            self.model_combobox.addItems(sorted(models))
+            if target and target in models:
+                self.model_combobox.setCurrentText(target)
+        self.model_combobox.blockSignals(False)
+
+        # Sync client with whatever is now selected
+        current = self.model_combobox.currentText()
+        if current:
+            self.chat_client.model_name = current
 
     def explain_code(self, code: str):
         """Explain the given code snippet."""
@@ -198,12 +230,17 @@ class OllamaChatWidget(PluginMainWidget):
         self.chat_display.clear()
 
     # ---- Private slots --------------------------------------------------
+    def _on_model_selected(self, model_name: str):
+        """User picked a model in the selector."""
+        if not model_name:
+            return
+        self.chat_client.model_name = model_name
+        self.sig_model_changed.emit(model_name)
+
     def _on_explain_triggered(self):
-        """Request selected text from the editor plugin."""
         self.sig_request_editor_selection.emit()
 
     def _on_send_clicked(self):
-        """Send the current input text."""
         text = self.input_edit.toPlainText().strip()
         if not text or self._streaming:
             return
@@ -211,12 +248,10 @@ class OllamaChatWidget(PluginMainWidget):
         self.ask_with_context(text)
 
     def _on_stop_clicked(self):
-        """Stop the current generation."""
         self.chat_client.stop()
         self._on_response_finished()
 
     def _on_token(self, token: str):
-        """Append a streamed token to the display."""
         cursor = self.chat_display.textCursor()
         cursor.movePosition(QTextCursor.End)
         cursor.insertText(token)
@@ -224,26 +259,22 @@ class OllamaChatWidget(PluginMainWidget):
         self.chat_display.ensureCursorVisible()
 
     def _on_response_finished(self):
-        """Handle end of streaming response."""
         self._streaming = False
         self.send_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self._append_raw("\n\n")
 
     def _on_error(self, error_msg: str):
-        """Display an error in the chat."""
         self._append_system(f"Error: {error_msg}")
 
     # ---- Formatting helpers ---------------------------------------------
     def _start_response(self):
-        """Prepare UI for incoming response."""
         self._streaming = True
         self.send_btn.setEnabled(False)
         self.stop_btn.setEnabled(True)
         self._append_raw("🤖 ")
 
     def _append_user(self, text: str):
-        """Append a user message to the display."""
         cursor = self.chat_display.textCursor()
         cursor.movePosition(QTextCursor.End)
         cursor.insertText(f"\n👤 {text}\n\n")
@@ -251,7 +282,6 @@ class OllamaChatWidget(PluginMainWidget):
         self.chat_display.ensureCursorVisible()
 
     def _append_system(self, text: str):
-        """Append a system message to the display."""
         cursor = self.chat_display.textCursor()
         cursor.movePosition(QTextCursor.End)
         cursor.insertText(f"\n⚙️ {text}\n\n")
@@ -259,7 +289,6 @@ class OllamaChatWidget(PluginMainWidget):
         self.chat_display.ensureCursorVisible()
 
     def _append_raw(self, text: str):
-        """Append raw text to the display."""
         cursor = self.chat_display.textCursor()
         cursor.movePosition(QTextCursor.End)
         cursor.insertText(text)

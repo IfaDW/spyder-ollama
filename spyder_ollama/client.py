@@ -13,8 +13,6 @@ import urllib.error
 
 # Third party imports
 from langchain_ollama import ChatOllama
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser
 from qtpy.QtCore import QObject, QThread, Signal, QMutex, QMutexLocker, Slot
 
 # Spyder imports
@@ -53,36 +51,38 @@ def fetch_ollama_models(base_url: str, timeout: float = 5.0) -> list[str]:
 
 def extract_cursor_context(
     full_text: str,
-    cursor_line: int,
+    cursor_line: int | None,
+    cursor_col: int | None = None,
     lines_before: int = 50,
     lines_after: int = 10,
 ) -> str:
     """Extract a window of code around the cursor and insert a marker.
 
-    If cursor_line is not available (0 or negative), fall back to
-    treating the end of the text as the cursor position.
+    cursor_line / cursor_col are 0-based (LSP convention). If either
+    is unavailable or out of range, the marker falls back to the end
+    of the line / end of the text.
     """
     lines = full_text.splitlines()
     total = len(lines)
 
-    if cursor_line <= 0 or cursor_line > total:
-        cursor_line = total
+    if total == 0:
+        return "<|CURSOR|>"
 
-    start = max(0, cursor_line - lines_before - 1)
-    end = min(total, cursor_line + lines_after)
+    if cursor_line is None or not (0 <= cursor_line < total):
+        cursor_line = total - 1
+        cursor_col = None
 
-    before = lines[start : cursor_line - 1]
-    cursor = lines[cursor_line - 1] if cursor_line - 1 < total else ""
-    after = lines[cursor_line:end]
+    line_text = lines[cursor_line]
+    if cursor_col is None or not (0 <= cursor_col <= len(line_text)):
+        cursor_col = len(line_text)
 
-    context_parts = []
-    if before:
-        context_parts.append("\n".join(before))
-    context_parts.append(cursor + "<|CURSOR|>")
-    if after:
-        context_parts.append("\n".join(after))
+    marked = line_text[:cursor_col] + "<|CURSOR|>" + line_text[cursor_col:]
 
-    return "\n".join(context_parts)
+    start = max(0, cursor_line - lines_before)
+    end = min(total, cursor_line + 1 + lines_after)
+
+    parts = lines[start:cursor_line] + [marked] + lines[cursor_line + 1 : end]
+    return "\n".join(parts)
 
 
 def parse_suggestions(raw_text: str) -> list[str]:
@@ -182,24 +182,22 @@ class OllamaCompletionClient(QObject):
         self.context_lines_after = context_lines_after
 
         # LangChain objects (created in start())
-        self.chain = None
+        self.llm = None
 
-    def _build_chain(self):
-        """Build the LCEL chain: prompt | llm | parser."""
-        llm = ChatOllama(
+    def _build_llm(self):
+        """Build the LLM.
+
+        No prompt template on purpose: the system prompt contains
+        literal JSON braces, which ChatPromptTemplate would treat as
+        template variables (KeyError on every invoke).
+        """
+        return ChatOllama(
             model=self.model_name,
             base_url=self.base_url,
             temperature=self.temperature,
             format="json",
             num_predict=512,
         )
-        prompt = ChatPromptTemplate.from_messages(
-            [
-                ("system", self.system_prompt),
-                ("human", "{code_context}"),
-            ]
-        )
-        return prompt | llm | StrOutputParser()
 
     def start(self):
         if not self.thread_started:
@@ -218,11 +216,11 @@ class OllamaCompletionClient(QObject):
             return
 
         try:
-            self.chain = self._build_chain()
+            self.llm = self._build_llm()
             self.sig_client_started.emit()
             logger.info("Ollama completion client ready.")
         except Exception as e:
-            logger.exception("Failed to initialize LangChain chain")
+            logger.exception("Failed to initialize Ollama LLM")
             self.sig_client_error.emit(f"Init error: {e}")
 
     def _on_thread_started(self):
@@ -259,20 +257,23 @@ class OllamaCompletionClient(QObject):
     def get_status(self, filename):
         """Emit current model name as status."""
         status = self.model_name
-        if self.chain is None:
+        if self.llm is None:
             status = f"{self.model_name} (not connected)"
         self.sig_status_response_ready[str].emit(status)
 
     def _invoke_chain(self, code_context: str) -> list[str]:
-        """Invoke the LCEL chain and parse suggestions."""
-        if self.chain is None:
+        """Invoke the LLM with system + human message, parse suggestions."""
+        if self.llm is None:
             return []
 
         with QMutexLocker(self.mutex):
             try:
-                raw_response = self.chain.invoke(
-                    {"code_context": code_context}
-                )
+                raw_response = self.llm.invoke(
+                    [
+                        ("system", self.system_prompt),
+                        ("human", code_context),
+                    ]
+                ).content
                 logger.debug("Raw LLM response: %s", raw_response)
                 suggestions = parse_suggestions(raw_response)
                 return suggestions[: self.num_suggestions]
@@ -302,10 +303,16 @@ class OllamaCompletionClient(QObject):
                 self.sig_response_ready.emit(_id, {"params": []})
                 return
 
-            cursor_line = msg.get("line", 0)
+            cursor_line = msg.get("line")
+            cursor_col = msg.get("column", msg.get("character"))
+            logger.debug(
+                "Completion request keys=%s line=%s col=%s",
+                sorted(msg.keys()), cursor_line, cursor_col,
+            )
             context = extract_cursor_context(
                 full_text,
                 cursor_line,
+                cursor_col,
                 self.context_lines_before,
                 self.context_lines_after,
             )

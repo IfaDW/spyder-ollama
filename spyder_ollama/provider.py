@@ -30,7 +30,7 @@ class OllamaProvider(SpyderCompletionProvider):
     COMPLETION_PROVIDER_NAME = "ollama"
     DEFAULT_ORDER = 1
     SLOW = True
-    CONF_VERSION = "1.0.0"
+    CONF_VERSION = "1.1.0"
     CONF_DEFAULTS = [
         ("suggestions", 3),
         ("model_name", "qwen2.5-coder:1.5b"),
@@ -41,22 +41,29 @@ class OllamaProvider(SpyderCompletionProvider):
     ]
 
     SYSTEM_PROMPT = (
-        "You are a code completion assistant integrated into a Python IDE. "
-        "Given a code context with a cursor position marked as `<|CURSOR|>`, "
-        "provide completions that would naturally follow at the cursor. "
-        "Respond ONLY with a JSON object containing a single key "
-        '"suggestions" mapped to a list of completion strings. '
-        "Each suggestion should be a short, syntactically valid continuation "
-        "(typically one expression or statement). "
-        "Do not include the code before the cursor in your suggestions. "
-        "Do not include markdown formatting or explanation.\n\n"
+        "You are a code completion engine inside a Python IDE. "
+        "The input is a code excerpt with the exact cursor position "
+        "marked as <|CURSOR|>. Predict ONLY the text to INSERT at "
+        "<|CURSOR|>.\n"
+        "Rules:\n"
+        "- The characters directly before <|CURSOR|> are the prefix the "
+        "user is typing. Every suggestion must continue seamlessly from "
+        "that prefix. If the prefix ends with 'df.', every suggestion "
+        "must be a method or attribute that completes 'df.' — for "
+        "example 'head()' or 'columns'.\n"
+        "- Never repeat text that already appears before the cursor.\n"
+        "- Each suggestion is short: an identifier, a call, or the rest "
+        "of the current statement. No full programs.\n"
+        "- Respond ONLY with a JSON object of the form "
+        '{"suggestions": ["...", "..."]}. '
+        "No markdown, no explanation.\n\n"
         "Example input:\n"
         "import pandas as pd\n"
         "df = pd.read_csv('data.csv')\n"
-        "df.drop<|CURSOR|>\n\n"
+        "df.drop<|CURSOR|>\n"
         "Example output:\n"
-        '{"suggestions": ["_duplicates()", "_duplicates(inplace=True)", '
-        '"na(subset=[\'col1\'])"]}'
+        '{"suggestions": ["_duplicates()", "na(subset=[\'col\'])", '
+        '"(columns=[\'col\'])"]}'
     )
 
     def __init__(self, parent, config):
