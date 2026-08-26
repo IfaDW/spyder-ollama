@@ -7,6 +7,7 @@
 
 # Standard library imports
 import logging
+import re
 
 # Third party imports
 from qtpy.QtCore import QEvent, Qt, Signal
@@ -304,20 +305,38 @@ class OllamaChatWidget(PluginMainWidget):
                 "".join(self._generation_buffer)
             )
             self._generation_buffer = []
-            if code.strip():
-                self.sig_code_generated.emit(code)
+            if not code.strip():
+                return
+            try:
+                compile(code, "<generated>", "exec")
+            except SyntaxError as e:
+                self._append_system(
+                    "Generated code failed the syntax check "
+                    f"(line {e.lineno}: {e.msg}) — NOT inserted into "
+                    "the editor. Try again, rephrase the comment, or "
+                    "switch to a code model (e.g. qwen2.5-coder)."
+                )
+                return
+            self.sig_code_generated.emit(code)
 
     @staticmethod
     def _clean_generated_code(text: str) -> str:
-        """Strip markdown fences the model may add despite instructions."""
+        """Extract code from the model response.
+
+        Small models often wrap code in markdown fences and surround
+        it with prose despite instructions. If fenced blocks exist
+        anywhere in the response, only their contents are kept;
+        otherwise the whole text is used with stray fences removed.
+        """
         text = text.strip()
-        if text.startswith("```"):
-            lines = text.split("\n")
-            lines = [
-                ln for ln in lines if not ln.strip().startswith("```")
-            ]
-            text = "\n".join(lines).strip()
-        return text
+        blocks = re.findall(r"```(?:[a-zA-Z0-9_+-]*)\n(.*?)```", text, re.DOTALL)
+        if blocks:
+            return "\n\n".join(b.strip() for b in blocks).strip()
+        lines = [
+            ln for ln in text.split("\n")
+            if not ln.strip().startswith("```")
+        ]
+        return "\n".join(lines).strip()
 
     def _on_error(self, error_msg: str):
         self._append_system(f"Error: {error_msg}")
