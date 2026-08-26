@@ -91,7 +91,7 @@ class OllamaStatusWidget(StatusBarWidget):
     def get_icon(self):
         """Load our icon; fall back to a stock icon if unavailable."""
         try:
-            icon = ima.icon("ollama")
+            icon = ima.icon("spyder_ollama")
             if icon is not None and not icon.isNull():
                 return icon
         except Exception:

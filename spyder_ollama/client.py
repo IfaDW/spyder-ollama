@@ -353,7 +353,7 @@ class OllamaCompletionClient(QObject):
                     "sortText": (0, i),
                     "documentation": suggestion,
                     "provider": PROVIDER_LABEL,
-                    "icon": ("ollama", ICON_SCALE),
+                    "icon": ("spyder_ollama", ICON_SCALE),
                 }
                 spyder_completions.append(entry)
 

@@ -10,11 +10,10 @@ import logging
 
 # Third party imports
 from langchain_ollama import ChatOllama
-from langchain_core.prompts import ChatPromptTemplate
 from qtpy.QtCore import QObject, QThread, Signal, Slot
 
 # Local imports
-from spyder_ollama.client import check_ollama_health
+from spyder_ollama.client import check_ollama_health, fetch_ollama_models
 
 
 logger = logging.getLogger(__name__)
@@ -26,6 +25,20 @@ EXPLAIN_SYSTEM_PROMPT = (
     "Focus on what the code does, why it might be written that way, "
     "and mention any potential issues or improvements. "
     "Use plain language. Format your response in Markdown."
+)
+
+GENERATE_SYSTEM_PROMPT = (
+    "You are a Python code generator inside an IDE. "
+    "The user gives you a comment describing a function or code block, "
+    "optionally with surrounding code for context. "
+    "Write the Python code that implements the description.\n"
+    "Rules:\n"
+    "- Output ONLY Python code. No explanations, no markdown fences.\n"
+    "- Do NOT repeat the user's comment in your output.\n"
+    "- Include a concise docstring.\n"
+    "- Use only the standard library and packages visible in the "
+    "provided context (e.g. if pandas is imported, you may use it).\n"
+    "- Write complete, runnable code."
 )
 
 CHAT_SYSTEM_PROMPT = (
@@ -76,10 +89,11 @@ class OllamaChatClient(QObject):
     sig_token = Signal(str)
     sig_response_finished = Signal()
     sig_error = Signal(str)
+    sig_notice = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.model_name = "qwen2.5-coder:1.5b"
+        self.model_name = ""
         self.base_url = "http://localhost:11434"
         self.temperature = 0.3
 
@@ -92,16 +106,35 @@ class OllamaChatClient(QObject):
         self.base_url = base_url
         self.temperature = temperature
 
-    def _build_llm(self):
-        return ChatOllama(
-            model=self.model_name,
-            base_url=self.base_url,
-            temperature=self.temperature,
-        )
-
     def is_available(self) -> bool:
         """Check if Ollama is reachable."""
         return check_ollama_health(self.base_url)
+
+    def _resolve_model(self) -> str:
+        """Return a model name that actually exists on the server.
+
+        Falls back to the first available model if the configured one
+        is missing, so a stale default never produces a hard 404.
+        """
+        available = fetch_ollama_models(self.base_url)
+        if not available:
+            return self.model_name
+        if self.model_name in available:
+            return self.model_name
+        fallback = available[0]
+        self.sig_notice.emit(
+            f"Model '{self.model_name}' not found on server — "
+            f"using '{fallback}' instead."
+        )
+        self.model_name = fallback
+        return fallback
+
+    def _build_llm(self, model: str):
+        return ChatOllama(
+            model=model,
+            base_url=self.base_url,
+            temperature=self.temperature,
+        )
 
     def explain_code(self, code: str):
         """Send a code explanation request (streaming)."""
@@ -125,20 +158,34 @@ class OllamaChatClient(QObject):
         ]
         self._start_stream(messages)
 
+    def generate_code(self, instruction: str, code_context: str = ""):
+        """Generate code from a comment/instruction (streaming)."""
+        human_msg = instruction
+        if code_context:
+            human_msg = (
+                f"Context (existing code in the file):\n"
+                f"```python\n{code_context}\n```\n\n"
+                f"Instruction:\n{instruction}"
+            )
+        messages = [
+            ("system", GENERATE_SYSTEM_PROMPT),
+            ("human", human_msg),
+        ]
+        self._start_stream(messages)
+
     def _start_stream(self, messages):
         """Start streaming in a background thread."""
-        # Clean up previous thread if running
         self.stop()
 
         if not self.is_available():
-            self.sig_error.emit(
-                f"Ollama not reachable at {self.base_url}"
-            )
+            self.sig_error.emit(f"Ollama not reachable at {self.base_url}")
             self.sig_response_finished.emit()
             return
 
+        model = self._resolve_model()
+
         try:
-            llm = self._build_llm()
+            llm = self._build_llm(model)
         except Exception as e:
             self.sig_error.emit(f"Failed to create LLM: {e}")
             self.sig_response_finished.emit()
@@ -149,7 +196,6 @@ class OllamaChatClient(QObject):
         self._worker.configure(llm, messages)
         self._worker.moveToThread(self._thread)
 
-        # Connect signals
         self._thread.started.connect(self._worker.run)
         self._worker.sig_token.connect(self.sig_token)
         self._worker.sig_error.connect(self.sig_error)

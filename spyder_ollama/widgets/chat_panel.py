@@ -37,6 +37,7 @@ logger = logging.getLogger(__name__)
 
 class OllamaChatActions:
     ExplainSelection = "explain_selection"
+    GenerateCode = "generate_code"
     ClearChat = "clear_chat"
 
 
@@ -46,6 +47,8 @@ class OllamaChatWidget(PluginMainWidget):
     ENABLE_SPINNER = True
 
     sig_request_editor_selection = Signal()
+    sig_request_code_generation = Signal()
+    sig_code_generated = Signal(str)
     sig_model_changed = Signal(str)
 
     def __init__(self, name, plugin, parent=None):
@@ -61,6 +64,8 @@ class OllamaChatWidget(PluginMainWidget):
         self.chat_client.sig_notice.connect(self._append_system)
 
         self._streaming = False
+        self._generating = False
+        self._generation_buffer = []
 
         # --- Model selector row ---
         self.model_combobox = QComboBox(self)
@@ -150,6 +155,14 @@ class OllamaChatWidget(PluginMainWidget):
             register_shortcut=True,
         )
 
+        generate_action = self.create_action(
+            OllamaChatActions.GenerateCode,
+            text=_("Generate Code from Comment"),
+            icon=self.create_icon("run"),
+            triggered=self._on_generate_triggered,
+            register_shortcut=True,
+        )
+
         clear_action = self.create_action(
             OllamaChatActions.ClearChat,
             text=_("Clear Chat"),
@@ -158,11 +171,11 @@ class OllamaChatWidget(PluginMainWidget):
         )
 
         toolbar = self.get_main_toolbar()
-        for item in [explain_action, clear_action]:
+        for item in [explain_action, generate_action, clear_action]:
             self.add_item_to_toolbar(item, toolbar=toolbar)
 
         menu = self.get_options_menu()
-        for item in [explain_action, clear_action]:
+        for item in [explain_action, generate_action, clear_action]:
             self.add_item_to_menu(item, menu=menu)
 
     def update_actions(self):
@@ -216,6 +229,22 @@ class OllamaChatWidget(PluginMainWidget):
         self._start_response()
         self.chat_client.explain_code(code)
 
+    def generate_from_comment(self, instruction: str, code_context: str = ""):
+        """Generate code from a comment and stream it into the panel.
+
+        On finish, sig_code_generated is emitted with the cleaned code
+        so the plugin can insert it into the editor.
+        """
+        if not instruction.strip():
+            self._append_system("No comment found at the cursor.")
+            return
+
+        self._append_user(f"Generate code for:\n{instruction}")
+        self._generating = True
+        self._generation_buffer = []
+        self._start_response()
+        self.chat_client.generate_code(instruction, code_context)
+
     def ask_with_context(self, question: str, code_context: str = ""):
         """Ask a question, optionally with code context."""
         if not question.strip():
@@ -240,6 +269,9 @@ class OllamaChatWidget(PluginMainWidget):
     def _on_explain_triggered(self):
         self.sig_request_editor_selection.emit()
 
+    def _on_generate_triggered(self):
+        self.sig_request_code_generation.emit()
+
     def _on_send_clicked(self):
         text = self.input_edit.toPlainText().strip()
         if not text or self._streaming:
@@ -252,6 +284,8 @@ class OllamaChatWidget(PluginMainWidget):
         self._on_response_finished()
 
     def _on_token(self, token: str):
+        if self._generating:
+            self._generation_buffer.append(token)
         cursor = self.chat_display.textCursor()
         cursor.movePosition(QTextCursor.End)
         cursor.insertText(token)
@@ -263,6 +297,27 @@ class OllamaChatWidget(PluginMainWidget):
         self.send_btn.setEnabled(True)
         self.stop_btn.setEnabled(False)
         self._append_raw("\n\n")
+
+        if self._generating:
+            self._generating = False
+            code = self._clean_generated_code(
+                "".join(self._generation_buffer)
+            )
+            self._generation_buffer = []
+            if code.strip():
+                self.sig_code_generated.emit(code)
+
+    @staticmethod
+    def _clean_generated_code(text: str) -> str:
+        """Strip markdown fences the model may add despite instructions."""
+        text = text.strip()
+        if text.startswith("```"):
+            lines = text.split("\n")
+            lines = [
+                ln for ln in lines if not ln.strip().startswith("```")
+            ]
+            text = "\n".join(lines).strip()
+        return text
 
     def _on_error(self, error_msg: str):
         self._append_system(f"Error: {error_msg}")
