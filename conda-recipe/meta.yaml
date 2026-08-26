@@ -1,0 +1,45 @@
+{% set version = "1.0.0" %}
+
+package:
+  name: spyder-ollama
+  version: {{ version }}
+
+source:
+  path: ..
+
+build:
+  number: 0
+  noarch: python
+  script: {{ PYTHON }} -m pip install . --no-deps --no-build-isolation -vv
+  entry_points:
+    - spyder.completions.ollama = spyder_ollama.provider:OllamaProvider
+    - spyder.plugins.ollama_chat = spyder_ollama.chat_plugin:OllamaChatPlugin
+
+requirements:
+  host:
+    - python >=3.10
+    - pip
+    - setuptools >=61.2.0
+  run:
+    - python >=3.10
+    - spyder >=6.0.0a3
+    - langchain-core >=0.3
+    - langchain-ollama >=1.0
+    - qtpy
+
+test:
+  imports:
+    - spyder_ollama
+    - spyder_ollama.provider
+    - spyder_ollama.client
+    - spyder_ollama.chat_client
+    - spyder_ollama.chat_plugin
+
+about:
+  home: https://github.com/IfaDW/spyder-ollama
+  license: MIT
+  license_file: LICENSE
+  summary: Local Ollama code completion and AI assistant for Spyder 6+
+  description: |
+    Inline code completions and a dockable assistant panel for Spyder,
+    powered by a locally running Ollama instance. No API keys, no cloud.
