@@ -25,6 +25,22 @@ from spyder.utils.image_path_manager import IMAGE_PATH_MANAGER
 
 logger = logging.getLogger(__name__)
 
+_IMAGE_PATH_REGISTERED = False
+
+
+def _register_image_path():
+    """Register the plugin image path exactly once.
+
+    The provider can be instantiated more than once by Spyder;
+    repeated registration triggers an override warning.
+    """
+    global _IMAGE_PATH_REGISTERED
+    if not _IMAGE_PATH_REGISTERED:
+        IMAGE_PATH_MANAGER.add_image_path(
+            get_module_data_path("spyder_ollama", relpath="images")
+        )
+        _IMAGE_PATH_REGISTERED = True
+
 
 class OllamaProvider(SpyderCompletionProvider):
     COMPLETION_PROVIDER_NAME = "ollama"
@@ -68,9 +84,7 @@ class OllamaProvider(SpyderCompletionProvider):
 
     def __init__(self, parent, config):
         super().__init__(parent, config)
-        IMAGE_PATH_MANAGER.add_image_path(
-            get_module_data_path("spyder_ollama", relpath="images")
-        )
+        _register_image_path()
         self.available_languages = []
         self.client = OllamaCompletionClient(
             parent=None,
