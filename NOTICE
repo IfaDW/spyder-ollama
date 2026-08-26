@@ -1,0 +1,16 @@
+spyder-ollama
+Copyright (c) 2024-2026 Datagniel (IfaDW)
+
+This project originated as a fork of langchain-provider
+(https://github.com/spyder-ide/langchain-provider),
+Copyright (c) Spyder Project Contributors,
+licensed under the MIT License.
+
+The codebase has since been substantially rewritten, but portions of
+the provider and status-bar widget structure derive from that project.
+The original license and copyright notice are preserved here in
+accordance with the MIT License terms.
+
+"Ollama" is a trademark of its respective owner. This project is an
+independent community integration and is not affiliated with or
+endorsed by Ollama.
