@@ -43,3 +43,6 @@ ollama = "spyder_ollama.provider:OllamaProvider"
 
 [project.entry-points."spyder.plugins"]
 ollama_chat = "spyder_ollama.chat_plugin:OllamaChatPlugin"
+
+[tool.setuptools.package-data]
+spyder_ollama = ["images/*"]

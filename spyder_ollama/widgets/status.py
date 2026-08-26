@@ -89,4 +89,11 @@ class OllamaStatusWidget(StatusBarWidget):
         menu.popup(pos)
 
     def get_icon(self):
-        return ima.icon("ollama")
+        """Load our icon; fall back to a stock icon if unavailable."""
+        try:
+            icon = ima.icon("ollama")
+            if icon is not None and not icon.isNull():
+                return icon
+        except Exception:
+            pass
+        return ima.icon("help")

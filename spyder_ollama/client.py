@@ -49,6 +49,30 @@ def fetch_ollama_models(base_url: str, timeout: float = 5.0) -> list[str]:
         return []
 
 
+def pull_model_stream(base_url: str, model: str):
+    """Pull a model via Ollama's API, yielding progress dicts.
+
+    Yields dicts like {"status": "...", "total": int, "completed": int}.
+    Raises URLError/OSError on connection problems.
+    """
+    payload = json.dumps({"name": model}).encode("utf-8")
+    req = urllib.request.Request(
+        f"{base_url}/api/pull",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        for raw_line in resp:
+            line = raw_line.decode("utf-8").strip()
+            if not line:
+                continue
+            try:
+                yield json.loads(line)
+            except json.JSONDecodeError:
+                continue
+
+
 def extract_cursor_context(
     full_text: str,
     cursor_line: int | None,

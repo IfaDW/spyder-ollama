@@ -1,0 +1,5 @@
+<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+  <!-- spyder-ollama icon: "O" ring + text cursor = local completion -->
+  <circle cx="16" cy="16" r="11" fill="none" stroke="#8C9BAB" stroke-width="3"/>
+  <rect x="14" y="10" width="4" height="12" rx="1.5" fill="#4FC1A6"/>
+</svg>
