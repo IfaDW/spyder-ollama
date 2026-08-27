@@ -166,7 +166,7 @@ class OllamaConfigDialog(QDialog):
         # --- Form layout ---
         form_layout = QFormLayout()
         form_layout.addRow(_("Ollama URL:"), url_layout)
-        form_layout.addRow(_("Model:"), model_layout)
+        form_layout.addRow(_("Completion model:"), model_layout)
         form_layout.addRow(_("Pull model:"), pull_layout)
         form_layout.addRow("", self.pull_progress)
         form_layout.addRow("", self.pull_status)

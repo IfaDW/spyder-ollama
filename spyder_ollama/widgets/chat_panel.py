@@ -74,12 +74,17 @@ class OllamaChatWidget(PluginMainWidget):
         self.model_combobox.currentTextChanged.connect(
             self._on_model_selected
         )
+        self.model_combobox.setToolTip(_(
+            "Model used for Explain, questions and Generate Code from "
+            "Comment.\nIndependent of the completion model in the "
+            "status bar."
+        ))
 
         self.refresh_models_btn = QPushButton(_("Refresh"), self)
         self.refresh_models_btn.clicked.connect(self.populate_models)
 
         model_row = QHBoxLayout()
-        model_row.addWidget(QLabel(_("Model:"), self))
+        model_row.addWidget(QLabel(_("Assistant model:"), self))
         model_row.addWidget(self.model_combobox, stretch=1)
         model_row.addWidget(self.refresh_models_btn)
 

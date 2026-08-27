@@ -28,7 +28,11 @@ logger = logging.getLogger(__name__)
 class OllamaStatusWidget(StatusBarWidget):
     """Status bar widget for Ollama completion provider."""
 
-    BASE_TOOLTIP = _("Ollama completion status")
+    BASE_TOOLTIP = _(
+        "Model used for inline code completions while typing.\n"
+        "Independent of the Assistant panel model.\n"
+        "Click to configure."
+    )
     DEFAULT_STATUS = _("not connected")
     ID = "ollama_status"
 
@@ -59,7 +63,7 @@ class OllamaStatusWidget(StatusBarWidget):
 
         self.update_tooltip()
         self.setVisible(ollama_enabled)
-        value = "Ollama: {0}".format(value)
+        value = "Ollama completions: {0}".format(value)
         super(OllamaStatusWidget, self).set_value(value)
 
     def get_tooltip(self):
