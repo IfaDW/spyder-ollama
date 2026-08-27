@@ -24,9 +24,21 @@ Three features in one package — all running against your local Ollama instance
 
 ## Installation
 
+The plugin must be installed **into the same environment that runs Spyder**.
+
+Recommended: a fresh conda environment with Spyder and the plugin together:
+
 ```bash
+conda create -n spyder-ollama -c conda-forge python=3.12 spyder
+conda activate spyder-ollama
 pip install git+https://github.com/IfaDW/spyder-ollama.git
+spyder
 ```
+
+If you already run Spyder from an existing conda environment, activate that environment and run only the `pip install` line.
+
+Note: standalone Spyder installers ship their own internal environment —
+installing the plugin there is not covered by this guide; use a conda-based Spyder as shown above.
 
 ## Inline Completions
 
