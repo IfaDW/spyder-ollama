@@ -8,6 +8,10 @@ Three features in one package — all running against your local Ollama instance
 2. **Ollama Assistant panel** — explain selected code, ask questions, streaming answers
 3. **Generate code from comments** — write a comment describing a function, get the implementation inserted below it
 
+![Inline completions](docs/screenshots/completions.png)
+
+![Generate code from a comment](docs/screenshots/assistant-generate.png)
+
 ## Requirements
 
 - **Spyder** ≥ 6.0
